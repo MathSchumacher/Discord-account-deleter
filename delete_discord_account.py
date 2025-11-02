@@ -143,7 +143,7 @@ class Change:
         try:
             response = session.post('https://discord.com/api/v9/users/@me/delete', headers=headers, json=data)
             if response.status_code == 204:
-                msg = "Solicitação de exclusão enviada com sucesso. Pode levar até 30 dias para completar."
+                msg = "Solicitação de exclusão enviada com sucesso. Não logue por 14 dias até a conta ser excluida"
                 print(msg)
                 logs.append({"message": msg, "level": "success"})
                 return True
