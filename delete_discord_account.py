@@ -385,7 +385,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
     options.binary_location = browser_path
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", false)
+    options.add_experimental_option("useAutomationExtension", False)  # Fixed: false -> False
     options.add_argument("--incognito")
     options.add_argument("--disable-notifications")
     options.add_argument("--disable-extensions")  # Additional stability for cloud
