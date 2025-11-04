@@ -11,12 +11,14 @@ import time
 import re
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 import shutil
 import webbrowser
+import platform
 
 try:
     import tls_client
@@ -373,15 +375,27 @@ def process_account(email, old_password, new_password, email_password=None, logs
     verification_required = False
     current_email_password = email_password
 
-    brave_path = r'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'
+    # Cloud-compatible: Use Chromium on Linux (Streamlit Cloud); fallback for local Windows Brave
+    if platform.system() == "Windows":
+        browser_path = r'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'
+    else:
+        browser_path = '/usr/bin/chromium-browser'  # Installed via packages.txt
 
     options = Options()
-    options.binary_location = brave_path
+    options.binary_location = browser_path
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
     options.add_argument("--incognito")
     options.add_argument("--disable-notifications")
+
+    # Cloud-specific: Headless mode and sandbox flags for Linux/Debian
+    if platform.system() != "Windows":
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--remote-debugging-port=9222")
 
     driver = None
     try:
@@ -391,7 +405,16 @@ def process_account(email, old_password, new_password, email_password=None, logs
         except StopIteration:
             pass
 
-        driver = webdriver.Chrome(options=options)
+        # Explicit driver path for cloud reliability (avoids webdriver_manager detection issues)
+        if platform.system() != "Windows":
+            service = Service('/usr/bin/chromedriver')  # From packages.txt
+        else:
+            service = None  # Use default PATH for local Windows
+        driver = webdriver.Chrome(service=service, options=options)
+
+        # Quick validation: Ensure driver is ready
+        driver.set_page_load_timeout(30)
+        print(f"Driver initialized successfully. Title: {driver.title}")  # Debug log
 
         driver.get('https://discord.com/login')
 
