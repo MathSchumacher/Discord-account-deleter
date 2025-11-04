@@ -1,5 +1,3 @@
-# app.py
-import subprocess  # Para rodar xvfb se necessário (cloud auto-instala)
 import streamlit as st
 import base64
 from delete_discord_account import process_account
@@ -89,7 +87,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. Título e Ícone Alinhados Lado a Lado ---
+# --- 3. Título e Ícone Alinhados Lado a Lado (corrigido com base64) ---
 with open("img/discord.svg", "rb") as f:
     discord_icon = base64.b64encode(f.read()).decode()
 
@@ -106,18 +104,22 @@ if 'logs' not in st.session_state:
     st.session_state.logs = []
 if 'processing' not in st.session_state:
     st.session_state.processing = False
-if 'gen' not in st.session_state:
-    st.session_state.gen = None
 if 'current_email' not in st.session_state:
     st.session_state.current_email = ""
 if 'current_password' not in st.session_state:
     st.session_state.current_password = ""
 if 'email_password' not in st.session_state:
     st.session_state.email_password = ""
+if 'step' not in st.session_state:
+    st.session_state.step = "initial"  # initial, running, need_captcha, waiting_captcha, need_2fa, waiting_2fa, need_email_pass, waiting_email_pass, manual_email_verify, waiting_manual_verify, done
 if 'result' not in st.session_state:
     st.session_state.result = None
+if 'generator' not in st.session_state:
+    st.session_state.generator = None
+if 'new_password' not in st.session_state:
+    st.session_state.new_password = "deletingsoon123"
 
-# --- 5. Formulário Principal ---
+# --- 5. Formulário Principal COMPACTO ---
 with st.form("account_submission_form"):
     col1, col2 = st.columns([2, 1])
     
@@ -135,8 +137,7 @@ with st.form("account_submission_form"):
             key="password_input"
         )
 
-    new_password = "deletingsoon123"
-    st.info(f"**Nova senha será definida como:** `{new_password}`")
+    st.info(f"**Nova senha será definida como:** `{st.session_state.new_password}`")
 
     submitted = st.form_submit_button(
         "🚀 Processar Conta", 
@@ -144,7 +145,7 @@ with st.form("account_submission_form"):
         disabled=st.session_state.processing
     )
 
-# --- 6. Iniciar Processamento ---
+# --- 6. Lógica de Processamento Principal ---
 if submitted and not st.session_state.processing:
     if not email or not old_password:
         st.warning("⚠️ Preencha email e senha para continuar.")
@@ -153,104 +154,176 @@ if submitted and not st.session_state.processing:
         st.session_state.current_email = email
         st.session_state.current_password = old_password
         st.session_state.logs = []
+        st.session_state.step = "running"
         st.session_state.result = None
-        st.session_state.gen = process_account(email, old_password, new_password)
+        st.session_state.generator = process_account(
+            st.session_state.current_email,
+            st.session_state.current_password,
+            st.session_state.new_password
+        )
         st.rerun()
 
-# --- 7. Gerenciar Generator ---
-if st.session_state.processing and st.session_state.gen:
-    try:
-        # Avançar generator
-        state = next(st.session_state.gen)
-        while isinstance(state, dict) and 'type' in state:
-            if state['type'] == 'log':
-                st.session_state.logs.append({'message': state['message'], 'level': state['level']})
-                st.rerun()  # Rerun to show log immediately
-            elif state['type'] == 'need_captcha':
-                st.warning("🛡️ CAPTCHA detectado! Resolva manualmente no navegador.")
-                if st.button("✅ Captcha Finalizado", type="primary"):
-                    st.session_state.gen.send("captcha_done")
-                    st.rerun()
-                st.stop()
-            elif state['type'] == 'need_2fa':
-                st.warning("🔐 2FA detectado! Insira o código no navegador.")
-                if st.button("✅ 2FA Finalizado", type="primary"):
-                    st.session_state.gen.send("2fa_done")
-                    st.rerun()
-                st.stop()
-            elif state['type'] == 'need_email_pass':
-                st.warning("📧 Verificação de email detectada! Digite a senha do email.")
-                with st.form("email_form"):
-                    email_pwd = st.text_input("🔑 Senha do Email:", type="password")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        submit_email = st.form_submit_button("✅ Confirmar", type="primary")
-                    with col2:
-                        cancel = st.form_submit_button("❌ Cancelar")
-                    if submit_email and email_pwd:
-                        st.session_state.gen.send(email_pwd)
-                        st.rerun()
-                    if cancel:
-                        st.session_state.gen.send(None)
-                        st.rerun()
-                st.stop()
-            elif state['type'] == 'manual_email_verify':
-                st.warning("📧 Verificação manual necessária. Verifique o email e clique no link de verificação no navegador Discord.")
-                if st.button("✅ Verificação Finalizada", type="primary"):
-                    st.session_state.gen.send("manual_verify_done")
-                    st.rerun()
-                st.stop()
-            else:
-                # Unknown state
-                break
-        # If we reach here, process completed
-        result, final_logs = st.session_state.gen.send(None)  # End it
-        st.session_state.logs.extend(final_logs)
-        st.session_state.result = result
-        st.session_state.processing = False
-        st.session_state.gen = None
-        st.rerun()
-    except StopIteration:
-        st.session_state.processing = False
-        st.session_state.gen = None
-        st.rerun()
-    except Exception as e:
-        st.session_state.logs.append({"message": f"Erro no generator: {e}", "level": "error"})
-        st.session_state.processing = False
-        st.session_state.gen = None
-        st.rerun()
+# --- 7. Gerenciamento de Passos Interativos (Generator Handling) ---
+if st.session_state.processing:
+    if st.session_state.step == "running":
+        with st.spinner("🔄 Processando..."):
+            try:
+                # Advance generator one step at a time
+                yielded = next(st.session_state.generator)
+                st.session_state.logs = st.session_state.generator.gi_frame.f_locals.get('logs', st.session_state.logs)  # Sync logs from generator locals if possible
+                if isinstance(yielded, dict):
+                    msg_type = yielded.get("type")
+                    if msg_type == "need_captcha":
+                        st.session_state.step = "need_captcha"
+                    elif msg_type == "waiting_captcha":
+                        st.session_state.step = "waiting_captcha"
+                    elif msg_type == "need_2fa":
+                        st.session_state.step = "need_2fa"
+                    elif msg_type == "waiting_2fa":
+                        st.session_state.step = "waiting_2fa"
+                    elif msg_type == "need_email_pass":
+                        st.session_state.step = "need_email_pass"
+                    elif msg_type == "waiting_email_pass":
+                        st.session_state.step = "waiting_email_pass"
+                    elif msg_type == "manual_email_verify":
+                        st.session_state.step = "manual_email_verify"
+                    elif msg_type == "waiting_manual_verify":
+                        st.session_state.step = "waiting_manual_verify"
+                    elif msg_type == "log":
+                        # Log already appended in generator; just rerun to update UI
+                        pass
+                    else:
+                        # Continue running
+                        st.session_state.step = "running"
+                else:
+                    # Non-dict yield (e.g., email password from send)
+                    st.session_state.step = "running"
+                st.rerun()
+            except StopIteration as e:
+                # Generator finished: capture return value
+                st.session_state.result, final_logs = e.value
+                st.session_state.logs = final_logs or st.session_state.logs
+                st.session_state.step = "done"
+                st.session_state.processing = False
+                st.rerun()
+            except Exception as e:
+                error_log = {"message": f"❌ Erro geral: {str(e)}", "level": "error"}
+                st.session_state.logs.append(error_log)
+                st.session_state.step = "done"
+                st.session_state.processing = False
+                st.session_state.result = "ERROR"
+                st.rerun()
 
-# --- 8. Mostrar Resultado ---
-if st.session_state.result:
-    if st.session_state.result == "SUCCESS":
-        st.success("✅ Sucesso!")
-    else:
-        st.error(f"❌ {st.session_state.result}")
+    # Handle interactive steps: Send signal back on button click and resume
+    def resume_with_signal(signal):
+        try:
+            yielded = st.session_state.generator.send(signal)
+            st.session_state.logs = st.session_state.generator.gi_frame.f_locals.get('logs', st.session_state.logs)
+            if isinstance(yielded, dict):
+                msg_type = yielded.get("type")
+                if "waiting" in msg_type:
+                    st.session_state.step = msg_type.replace("waiting_", "need_")
+                else:
+                    st.session_state.step = "running"
+            st.rerun()
+        except StopIteration as e:
+            st.session_state.result, final_logs = e.value
+            st.session_state.logs = final_logs or st.session_state.logs
+            st.session_state.step = "done"
+            st.session_state.processing = False
+            st.rerun()
+        except Exception as e:
+            error_log = {"message": f"❌ Erro ao retomar: {str(e)}", "level": "error"}
+            st.session_state.logs.append(error_log)
+            st.session_state.step = "done"
+            st.session_state.processing = False
+            st.session_state.result = "ERROR"
+            st.rerun()
 
-# --- 9. Exibe Logs ---
+    # Passo: Need CAPTCHA (show warning + button)
+    if st.session_state.step == "need_captcha":
+        st.warning("🛡️ CAPTCHA detectado! Resolva manualmente no navegador aberto.")
+        if st.button("✅ CAPTCHA Finalizado", type="primary", use_container_width=True):
+            resume_with_signal("captcha_done")
+
+    # Passo: Waiting CAPTCHA (should not show; internal)
+    if st.session_state.step == "waiting_captcha":
+        st.info("Aguardando confirmação do CAPTCHA...")
+        st.rerun()  # Loop until signal
+
+    # Passo: Need 2FA
+    if st.session_state.step == "need_2fa":
+        st.warning("🔐 2FA detectado! Insira o código no navegador.")
+        if st.button("✅ 2FA Finalizado", type="primary", use_container_width=True):
+            resume_with_signal("2fa_done")
+
+    # Passo: Need Email Password
+    if st.session_state.step == "need_email_pass":
+        st.warning("📧 Verificação de email detectada! Digite a senha do seu email.")
+        with st.form("email_form"):
+            email_pwd = st.text_input("🔑 Senha do Email:", type="password", key="email_pwd")
+            col_email1, col_email2 = st.columns([1, 1])
+            with col_email1:
+                if st.form_submit_button("✅ Confirmar Senha", type="primary", use_container_width=True):
+                    if email_pwd:
+                        st.session_state.email_password = email_pwd
+                        # Send the password back to generator
+                        try:
+                            yielded = st.session_state.generator.send(email_pwd)
+                            st.session_state.logs = st.session_state.generator.gi_frame.f_locals.get('logs', st.session_state.logs)
+                            st.session_state.step = "running"
+                            st.rerun()
+                        except StopIteration as e:
+                            st.session_state.result, final_logs = e.value
+                            st.session_state.logs = final_logs or st.session_state.logs
+                            st.session_state.step = "done"
+                            st.session_state.processing = False
+                            st.rerun()
+                        except Exception as e:
+                            error_log = {"message": f"❌ Erro na verificação: {str(e)}", "level": "error"}
+                            st.session_state.logs.append(error_log)
+                            st.session_state.step = "done"
+                            st.session_state.processing = False
+                            st.session_state.result = "ERROR"
+                            st.rerun()
+                    else:
+                        st.error("Digite a senha do email.")
+            with col_email2:
+                if st.form_submit_button("❌ Cancelar", use_container_width=True):
+                    st.session_state.processing = False
+                    st.session_state.step = "done"
+                    st.session_state.result = "CANCELLED"
+                    st.rerun()
+
+    # Passo: Manual Email Verify
+    if st.session_state.step == "manual_email_verify":
+        st.warning("📧 Não foi possível automatizar a verificação. Verifique manualmente no email e no navegador.")
+        if st.button("✅ Verificação Finalizada", type="primary", use_container_width=True):
+            resume_with_signal("manual_verify_done")
+
+    # Passo final: Done
+    if st.session_state.step == "done":
+        st.session_state.processing = False
+        if st.session_state.result == "SUCCESS":
+            st.success("✅ Processo concluído com sucesso!")
+        else:
+            st.error(f"❌ Processo finalizado com status: {st.session_state.result}")
+        st.session_state.step = "initial"
+
+# --- 8. Exibe Logs em Tempo Real ---
 if st.session_state.logs:
-    st.subheader("📋 Logs em Tempo Real")
-    for log in st.session_state.logs:
-        msg = log["message"]
-        level = log["level"]
-        if level == "success":
+    st.subheader("📋 Logs do Processo")
+    for log_entry in st.session_state.logs:
+        msg = log_entry.get("message", "Log sem mensagem")
+        level = log_entry.get("level", "info")
+        
+        if "Wrong Email" in msg or "Wrong Login" in msg:
+            st.warning(msg)
+        elif "Wrong Password" in msg:
+            st.error(msg)
+        elif level == "success":
             st.success(msg)
         elif level == "error":
             st.error(msg)
         elif level == "warning":
             st.warning(msg)
-        else:
-            st.info(msg)
-
-# --- 10. Reiniciar ---
-if st.button("🔄 Reiniciar"):
-    for key in st.session_state.keys():
-        delattr(st.session_state, key)
-    st.rerun()
-
-# --- 11. Footer ---
-st.markdown("---")
-st.markdown(
-    '<div class="footer">Discord Account Deleter • Use com responsabilidade</div>',
-    unsafe_allow_html=True
-)
