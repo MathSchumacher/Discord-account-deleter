@@ -379,13 +379,13 @@ def process_account(email, old_password, new_password, email_password=None, logs
     if platform.system() == "Windows":
         browser_path = r'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'
     else:
-        browser_path = '/usr/bin/chromium-browser'  # Installed via packages.txt
+        browser_path = '/usr/bin/chromium'  # Corrected for Debian Bookworm (from 'chromium' package)
 
     options = Options()
     options.binary_location = browser_path
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)  # Fixed: false -> False
+    options.add_experimental_option("useAutomationExtension", False)
     options.add_argument("--incognito")
     options.add_argument("--disable-notifications")
     options.add_argument("--disable-extensions")  # Additional stability for cloud
@@ -412,13 +412,15 @@ def process_account(email, old_password, new_password, email_password=None, logs
         if platform.system() != "Windows":
             driver_path = '/usr/bin/chromedriver'
             if os.path.exists(driver_path):
+                print(f"Browser path: {browser_path} (exists: {os.path.exists(browser_path)})")
+                print(f"Driver path: {driver_path} (exists: {os.path.exists(driver_path)})")
                 if not os.access(driver_path, os.X_OK):
                     os.chmod(driver_path, 0o755)  # Ensure executable permissions
                     print(f"Applied chmod to driver: {driver_path}")
                 service = Service(executable_path=driver_path)
                 print(f"Using explicit driver: {driver_path}")
             else:
-                raise Exception(f"APT driver not found at {driver_path}. Add 'chromium-chromedriver' to packages.txt.")
+                raise Exception(f"Driver not found at {driver_path}. Ensure 'packages.txt' includes 'chromium-driver' for Streamlit Cloud.")
         else:
             service = None  # Use PATH/Selenium Manager for local
 
@@ -614,7 +616,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
 
             error_type = None
             if 'login' in current_url.lower():
-                # Fixed: Ensured closed delimiters for any() expressions
+                # Fixed: Ensured closed delimiters and full lists for any() expressions
                 if any(phrase in page_source for phrase in ['couldn\'t find an account', 'não encontramos uma conta', 'email not found', 'e-mail não encontrado']):
                     error_type = "Wrong Email"
                     gen = log_message("⚠️ AVISO: Email não encontrado. Verifique se o email está correto.", "error")
