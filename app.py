@@ -1,4 +1,5 @@
 # app.py
+import subprocess  # Para rodar xvfb se necessário (cloud auto-instala)
 import streamlit as st
 import base64
 from delete_discord_account import process_account
