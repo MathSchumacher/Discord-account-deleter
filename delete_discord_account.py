@@ -56,7 +56,7 @@ class EmailVerifier:
             domain = self.email_address.lower().split('@')[-1]
             if 'gmail.com' in domain:
                 print("Dica: Para Gmail, use 'App Password' se 2FA estiver ativado (Configurações > Segurança > App Passwords)")
-            elif 'outlook.com' in domain or 'hotmail.com' in domain:
+            elif 'outlook.com' in domain or 'hot.com' in domain:
                 print("Dica: Para Outlook, gere 'App Password' em Configurações > Segurança > Senhas de App Mais Seguras")
             return False
     
@@ -385,7 +385,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
     options.binary_location = browser_path
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
+    options.add_experimental_option("useAutomationExtension", false)
     options.add_argument("--incognito")
     options.add_argument("--disable-notifications")
     options.add_argument("--disable-extensions")  # Additional stability for cloud
@@ -397,6 +397,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--remote-debugging-port=9222")
+        options.add_argument("--disable-software-rasterizer")  # Fix for headless rendering
 
     driver = None
     service = None
@@ -411,12 +412,13 @@ def process_account(email, old_password, new_password, email_password=None, logs
         if platform.system() != "Windows":
             driver_path = '/usr/bin/chromedriver'
             if os.path.exists(driver_path):
-                os.chmod(driver_path, 0o755)  # Ensure executable permissions
+                if not os.access(driver_path, os.X_OK):
+                    os.chmod(driver_path, 0o755)  # Ensure executable permissions
+                    print(f"Applied chmod to driver: {driver_path}")
                 service = Service(executable_path=driver_path)
                 print(f"Using explicit driver: {driver_path}")
             else:
-                print(f"Driver not found at {driver_path}; falling back to Selenium Manager")
-                service = None  # Triggers auto-download
+                raise Exception(f"APT driver not found at {driver_path}. Add 'chromium-chromedriver' to packages.txt.")
         else:
             service = None  # Use PATH/Selenium Manager for local
 
@@ -424,6 +426,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
 
         # Quick validation: Ensure driver is ready and log versions for troubleshooting
         driver.set_page_load_timeout(30)
+        driver.get('chrome://version/')  # Simple command to test execution
         capabilities = driver.capabilities
         chrome_version = capabilities.get('browserVersion', 'Unknown')
         driver_version = capabilities.get('chrome', {}).get('chromedriverVersion', 'Unknown')
@@ -611,7 +614,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
 
             error_type = None
             if 'login' in current_url.lower():
-                if any(phrase in page_source for phrase in ['couldn\'t find an account', 'não encontramos uma conta', 'email not found', 'e-mail não encontrado']):
+                if any(phrase in page_source for phrase in ['couldn't find an account', 'não encontramos uma conta', 'email not found', 'e-mail não encontrado']):
                     error_type = "Wrong Email"
                     gen = log_message("⚠️ AVISO: Email não encontrado. Verifique se o email está correto.", "error")
                     try:
@@ -682,7 +685,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
         try:
             next(gen)
         except StopIteration:
-                pass
+            pass
         if driver:
             driver.quit()
         return "ERROR", logs
