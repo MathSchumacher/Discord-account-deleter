@@ -56,7 +56,7 @@ class EmailVerifier:
             domain = self.email_address.lower().split('@')[-1]
             if 'gmail.com' in domain:
                 print("Dica: Para Gmail, use 'App Password' se 2FA estiver ativado (Configurações > Segurança > App Passwords)")
-            elif 'outlook.com' in domain or 'hot.com' in domain:
+            elif 'outlook.com' in domain or 'hotmail.com' in domain:
                 print("Dica: Para Outlook, gere 'App Password' em Configurações > Segurança > Senhas de App Mais Seguras")
             return False
     
@@ -204,7 +204,7 @@ class Change:
             'x-debug-options': 'bugReporterEnabled',
             'x-discord-locale': 'en-US',
             'x-discord-timezone': 'America/Sao_Paulo',
-            'x-super-properties': 'eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoiIiwic3lzdGVtX2xvY2FsZSI6InB0LUJSIiwiYnJvd3Nlcl91c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzEzMS4wLjAuMCBTYWZhcmkvNTM3LjM2IEVkZy8xMzEuMC4wLjAiLCJicm93c2VyX3ZlcnNpb24iOiIxMzEuMC4wLjAiLCJvc192ZXJzaW9uIjoiMTAiLCJyZWZlcnJlciI6IiIsInJlZmVycmluZ19kb21haW4iOiIiLCJyZWZlcnJlcl9jdXJyZW50IjoiIiwicmVmZXJyaW5nX2RvbWFpbl9jdXJyZW50IjoiIiwicmVsZWFzZV9jaGFubmVsIjoic3RhYmxlIiwiY2xpZW50X2J1aWxkX251bWJlciI6MzAwMDAwLCJjbGllbnRfZXZlbnRfc291cmNlIjpudWxsfQ==',
+            'x-super-properties': """eyJvcyI6IldpbmRvd3MiLCJicm93c2VyIjoiQ2hyb21lIiwiZGV2aWNlIjoiIiwic3lzdGVtX2xvY2FsZSI6InB0LUJSIiwiYnJvd3Nlcl91c2VyX2FnZW50IjoiTW96aWxsYS81LjAgKFdpbmRvd3MgTlQgMTAuMDsgV2luNjQ7IHg2NCkgQXBwbGVXZWJLaXQvNTM3LjM2IChLSFRNTCwgbGlrZSBHZWNrbykgQ2hyb21lLzEzMS4wLjAuMCBTYWZhcmkvNTM3LjM2IEVkZy8xMzEuMC4wLjAiLCJicm93c2VyX3ZlcnNpb24iOiIxMzEuMC4wLjAiLCJvc192ZXJzaW9uIjoiMTAiLCJyZWZlcnJlciI6IiIsInJlZmVycmluZ19kb21haW4iOiIiLCJyZWZlcnJlcl9jdXJyZW50IjoiIiwicmVmZXJyaW5nX2RvbWFpbl9jdXJyZW50IjoiIiwicmVsZWFzZV9jaGFubmVsIjoic3RhYmxlIiwiY2xpZW50X2J1aWxkX251bWJlciI6MzAwMDAwLCJjbGllbnRfZXZlbnRfc291cmNlIjpudWxsfQ==""",
         }
    
     def Changer(self, token, password, email, new_pass, logs=None):
@@ -498,7 +498,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
                     return "CAPTCHA_FAILED", logs
                 continue
 
-            # Checa por 2FA
+            # Checa por 2FA (ensured proper indentation for try-except)
             try:
                 if driver.find_elements(By.NAME, "code"):
                     gen = log_message("2FA detectado. Insira o código manualmente no navegador.", "warning")
@@ -517,7 +517,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
                         if driver:
                             driver.quit()
                         return "2FA_REQUIRED", logs
-            except:
+            except Exception:  # Broad catch for any detection issues; use Exception for safety
                 pass
 
             # Checa por verificação de email
@@ -614,7 +614,8 @@ def process_account(email, old_password, new_password, email_password=None, logs
 
             error_type = None
             if 'login' in current_url.lower():
-                if any(phrase in page_source for phrase in ['couldn't find an account', 'não encontramos uma conta', 'email not found', 'e-mail não encontrado']):
+                # Fixed: Ensured closed delimiters for any() expressions
+                if any(phrase in page_source for phrase in ['couldn\'t find an account', 'não encontramos uma conta', 'email not found', 'e-mail não encontrado']):
                     error_type = "Wrong Email"
                     gen = log_message("⚠️ AVISO: Email não encontrado. Verifique se o email está correto.", "error")
                     try:
