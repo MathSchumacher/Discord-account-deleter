@@ -388,6 +388,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
     options.add_experimental_option("useAutomationExtension", False)
     options.add_argument("--incognito")
     options.add_argument("--disable-notifications")
+    options.add_argument("--disable-extensions")  # Additional stability for cloud
 
     # Cloud-specific: Headless mode and sandbox flags for Linux/Debian
     if platform.system() != "Windows":
@@ -398,6 +399,7 @@ def process_account(email, old_password, new_password, email_password=None, logs
         options.add_argument("--remote-debugging-port=9222")
 
     driver = None
+    service = None
     try:
         gen = log_message("Abrindo navegador e tentando login automático. Aguarde...", "info")
         try:
@@ -405,17 +407,41 @@ def process_account(email, old_password, new_password, email_password=None, logs
         except StopIteration:
             pass
 
-        # Explicit driver path for cloud reliability (avoids webdriver_manager detection issues)
+        # Fix for driver location: Explicit path on Linux; fallback to Selenium Manager on Windows/other
         if platform.system() != "Windows":
-            service = Service('/usr/bin/chromedriver')  # From packages.txt
+            driver_path = '/usr/bin/chromedriver'
+            if os.path.exists(driver_path):
+                os.chmod(driver_path, 0o755)  # Ensure executable permissions
+                service = Service(executable_path=driver_path)
+                print(f"Using explicit driver: {driver_path}")
+            else:
+                print(f"Driver not found at {driver_path}; falling back to Selenium Manager")
+                service = None  # Triggers auto-download
         else:
-            service = None  # Use default PATH for local Windows
+            service = None  # Use PATH/Selenium Manager for local
+
         driver = webdriver.Chrome(service=service, options=options)
 
-        # Quick validation: Ensure driver is ready
+        # Quick validation: Ensure driver is ready and log versions for troubleshooting
         driver.set_page_load_timeout(30)
-        print(f"Driver initialized successfully. Title: {driver.title}")  # Debug log
+        capabilities = driver.capabilities
+        chrome_version = capabilities.get('browserVersion', 'Unknown')
+        driver_version = capabilities.get('chrome', {}).get('chromedriverVersion', 'Unknown')
+        print(f"Driver initialized successfully. Chrome: {chrome_version}, Driver: {driver_version}")
+        if 'Unknown' in chrome_version or 'Unknown' in driver_version:
+            raise Exception("Version mismatch detected - please update driver")
 
+    except Exception as e:
+        error_msg = f"Erro ao inicializar navegador: {str(e)}. Verifique instalação de Chromium/Chromedriver."
+        gen = log_message(error_msg, "error")
+        try:
+            next(gen)
+        except StopIteration:
+            pass
+        logs.append({"message": error_msg, "level": "error"})
+        return "DRIVER_ERROR", logs
+
+    try:
         driver.get('https://discord.com/login')
 
         WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "email")))
@@ -656,8 +682,8 @@ def process_account(email, old_password, new_password, email_password=None, logs
         try:
             next(gen)
         except StopIteration:
-            pass
-        if 'driver' in locals() and driver:
+                pass
+        if driver:
             driver.quit()
         return "ERROR", logs
 
