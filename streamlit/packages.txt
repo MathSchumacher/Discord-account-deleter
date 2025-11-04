@@ -1,4 +1,5 @@
 xvfb
 chromium
 chromium-driver
+chromium-chromedriver
 ca-certificates
