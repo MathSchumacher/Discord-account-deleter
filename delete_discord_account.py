@@ -1,3 +1,4 @@
+# delete_discord_account.py
 import os
 import random
 import string
@@ -15,6 +16,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
 import shutil
+import webbrowser
 
 try:
     import tls_client
@@ -24,10 +26,21 @@ except ModuleNotFoundError:
     import tls_client
 
 class EmailVerifier:
-    def __init__(self, email_address, email_password, imap_server="imap.gmail.com"):
+    def __init__(self, email_address, email_password, imap_server=None):
         self.email_address = email_address
         self.email_password = email_password
-        self.imap_server = imap_server
+        domain = email_address.lower().split('@')[-1]
+        if imap_server is None:
+            if 'gmail.com' in domain:
+                self.imap_server = "imap.gmail.com"
+            elif 'outlook.com' in domain or 'hotmail.com' in domain:
+                self.imap_server = "imap-mail.outlook.com"
+            elif 'yahoo.com' in domain:
+                self.imap_server = "imap.mail.yahoo.com"
+            else:
+                self.imap_server = "imap.gmail.com"  # default
+        else:
+            self.imap_server = imap_server
         self.mail = None
     
     def connect(self):
@@ -38,6 +51,11 @@ class EmailVerifier:
             return True
         except Exception as e:
             print(f"Erro ao conectar ao email: {e}")
+            domain = self.email_address.lower().split('@')[-1]
+            if 'gmail.com' in domain:
+                print("Dica: Para Gmail, use 'App Password' se 2FA estiver ativado (Configurações > Segurança > App Passwords)")
+            elif 'outlook.com' in domain or 'hotmail.com' in domain:
+                print("Dica: Para Outlook, gere 'App Password' em Configurações > Segurança > Senhas de App Mais Seguras")
             return False
     
     def disconnect(self):
@@ -207,15 +225,10 @@ class Change:
             elif response.status_code == 400:
                 error = response.json()
                 if 'code' in error.get('errors', {}).get('password', {}):
-                    code = input("2FA requerido para mudança de senha. Digite o código: ")
-                    data['code'] = code
-                    response = session.patch('https://discord.com/api/v9/users/@me', headers=headers, json=data)
-                    if response.status_code == 200:
-                        new_token = response.json()['token']
-                        msg = f"(+): Senha alterada com 2FA para {email} → {new_token[:20]}..."
-                        print(msg)
-                        logs.append({"message": msg, "level": "success"})
-                        return True, new_token
+                    msg = f"2FA requerido para mudança de senha. Digite o código manualmente."
+                    print(msg)
+                    logs.append({"message": msg, "level": "warning"})
+                    return False, None
                 msg = f"(!): Erro 400 na mudança para {email}: {error}"
                 print(msg)
                 logs.append({"message": msg, "level": "error"})
@@ -247,14 +260,10 @@ class Change:
             elif response.status_code == 400:
                 error = response.json()
                 if 'code' in error.get('errors', {}).get('password', {}):
-                    code = input("2FA requerido para exclusão. Digite o código: ")
-                    data['code'] = code
-                    response = session.post('https://discord.com/api/v9/users/@me/delete', headers=headers, json=data)
-                    if response.status_code == 204:
-                        msg = "Solicitação de exclusão enviada com sucesso (com 2FA)."
-                        print(msg)
-                        logs.append({"message": msg, "level": "success"})
-                        return True
+                    msg = f"2FA requerido para exclusão. Digite o código manualmente."
+                    print(msg)
+                    logs.append({"message": msg, "level": "warning"})
+                    return False
                 msg = f"(!): Erro 400 na exclusão: {error}"
                 print(msg)
                 logs.append({"message": msg, "level": "error"})
@@ -315,160 +324,275 @@ def detect_email_verification(driver):
     
     return False
 
+def detect_captcha(driver):
+    """Detecta se há um CAPTCHA na página"""
+    try:
+        captcha_indicators = [
+            (By.CLASS_NAME, "h-captcha"),
+            (By.CSS_SELECTOR, "[data-hcaptcha-widget-id]"),
+            (By.CSS_SELECTOR, "iframe[src*='hcaptcha.com']"),
+            (By.XPATH, "//*[contains(text(), 'CAPTCHA')]"),
+            (By.XPATH, "//*[contains(text(), 'Verificação de segurança')]")
+        ]
+        for by, value in captcha_indicators:
+            if driver.find_elements(by, value):
+                return True
+    except Exception as e:
+        print(f"Erro na detecção de CAPTCHA: {e}")
+    return False
+
+def get_email_web_url(email):
+    """Retorna URL web do email baseado no domínio"""
+    domain = email.lower().split('@')[-1]
+    if 'gmail.com' in domain:
+        return 'https://mail.google.com/mail/u/0/#inbox'
+    elif 'outlook.com' in domain or 'hotmail.com' in domain:
+        return 'https://outlook.live.com/mail/inbox'
+    elif 'yahoo.com' in domain:
+        return 'https://mail.yahoo.com'
+    else:
+        return None
+
 def process_account(email, old_password, new_password, email_password=None, logs=None):
-    """Processa uma conta: obtém token, muda senha e exclui."""
+    """Processa uma conta como generator para interatividade com frontend."""
     if logs is None:
         logs = []
 
     def log_message(msg, level="info"):
         print(msg)
         logs.append({"message": msg, "level": level})
+        yield {"type": "log", "message": msg, "level": level}  # Yield log for real-time
 
-    log_message("Iniciando o processo de login automático...")
+    gen = log_message("Iniciando o processo de login automático...", "info")
+    next(gen)
 
     token = None
     verification_required = False
-    email_verification_password = email_password
-    
-    while not token:
-        log_message("Tentando login automático. Aguarde...")
+    current_email_password = email_password
 
-        brave_path = 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe'
+    brave_path = r'C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'
 
-        options = Options()
-        options.binary_location = brave_path
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.add_experimental_option("useAutomationExtension", False)
-        options.add_argument("--incognito")
-        options.add_argument("--disable-notifications")
-        options.add_argument("--user-data-dir=" + os.path.join(os.getcwd(), "temp_profile_token"))
+    options = Options()
+    options.binary_location = brave_path
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    options.add_argument("--incognito")
+    options.add_argument("--disable-notifications")
 
-        driver = webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(options=options)
 
+    try:
+        gen = log_message("Abrindo navegador e tentando login automático. Aguarde...", "info")
+        next(gen)
+
+        driver.get('https://discord.com/login')
+
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "email")))
+        email_input = driver.find_element(By.NAME, "email")
+        email_input.clear()
+        email_input.send_keys(email)
+
+        password_input = driver.find_element(By.NAME, "password")
+        password_input.clear()
+        password_input.send_keys(old_password)
+
+        submit_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
+        submit_button.click()
+
+        # Loop principal
+        verification_checked = False
+        captcha_resolved = False
+        start_time = time.time()
         login_success = False
-        try:
-            driver.get('https://discord.com/login')
+        while time.time() - start_time < 600:
+            current_url = driver.current_url.lower()
 
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "email")))
-            email_input = driver.find_element(By.NAME, "email")
-            email_input.clear()
-            email_input.send_keys(email)
+            if 'channels' in current_url or 'app' in current_url:
+                login_success = True
+                break
 
-            password_input = driver.find_element(By.NAME, "password")
-            password_input.clear()
-            password_input.send_keys(old_password)
-
-            submit_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
-            submit_button.click()
-
-            # Aguarda e verifica se precisa de verificação
-            time.sleep(5)
-            
-            # Detecta se verificação de email é necessária
-            verification_required = detect_email_verification(driver)
-            
-            if verification_required and not email_verification_password:
-                log_message("⚠️ Verificação de email detectada! O processo parou aguardando a senha do email.", "warning")
-                driver.quit()
-                return "EMAIL_VERIFICATION_REQUIRED", logs
-            
-            if verification_required and email_verification_password:
-                log_message("Verificação de email detectada. Iniciando processo automático...", "info")
-                
-                verifier = EmailVerifier(email, email_verification_password)
-                verification_url = verifier.search_discord_verification_email(timeout=60)
-                
-                if verification_url:
-                    log_message("URL de verificação encontrada! Processando...", "success")
-                    driver.execute_script(f"window.open('{verification_url}', '_blank');")
-                    driver.switch_to.window(driver.window_handles[-1])
-                    time.sleep(5)
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
-                    time.sleep(3)
-                    log_message("Verificação de email concluída!", "success")
+            if detect_captcha(driver) and not captcha_resolved:
+                gen = log_message("CAPTCHA detectado! Por favor, resolva manualmente no navegador aberto.", "warning")
+                next(gen)
+                yield {"type": "need_captcha"}
+                # Wait for frontend to signal resolution
+                user_signal = yield {"type": "waiting_captcha"}
+                if user_signal == "captcha_done":
+                    captcha_resolved = True
+                    gen = log_message("CAPTCHA resolvido! Prosseguindo...", "success")
+                    next(gen)
                 else:
-                    log_message("Não foi possível encontrar o email automaticamente. Tente verificar manualmente.", "warning")
+                    gen = log_message("CAPTCHA não resolvido. Cancelando.", "error")
+                    next(gen)
                     driver.quit()
-                    return "EMAIL_VERIFICATION_REQUIRED", logs
+                    return "CAPTCHA_FAILED", logs
+                continue
 
+            # Checa por 2FA
+            try:
+                if driver.find_elements(By.NAME, "code"):
+                    gen = log_message("2FA detectado. Insira o código manualmente no navegador.", "warning")
+                    next(gen)
+                    yield {"type": "need_2fa"}
+                    user_signal = yield {"type": "waiting_2fa"}
+                    if user_signal != "2fa_done":
+                        gen = log_message("2FA não completado. Cancelando.", "error")
+                        next(gen)
+                        driver.quit()
+                        return "2FA_REQUIRED", logs
+            except:
+                pass
+
+            # Checa por verificação de email
+            if not verification_checked:
+                time.sleep(5)
+                verification_required = detect_email_verification(driver)
+                verification_checked = True
+
+            if verification_required:
+                if current_email_password is None:
+                    gen = log_message("Verificação de email detectada! Aguardando senha do email do frontend.", "warning")
+                    next(gen)
+                    yield {"type": "need_email_pass"}
+                    current_email_password = yield {"type": "waiting_email_pass"}
+                    if current_email_password is None:
+                        gen = log_message("Senha do email não fornecida. Tentando manual.", "warning")
+                        next(gen)
+                        # Fallback to manual
+                        email_web_url = get_email_web_url(email)
+                        if email_web_url:
+                            webbrowser.open(email_web_url)
+                            gen = log_message(f"Abrindo {email_web_url} no navegador para verificação manual.", "info")
+                            next(gen)
+                        yield {"type": "manual_email_verify"}
+                        user_signal = yield {"type": "waiting_manual_verify"}
+                        if user_signal != "manual_verify_done":
+                            driver.quit()
+                            return "EMAIL_VERIFICATION_FAILED", logs
+                        verification_required = False
+                        continue
+                else:
+                    gen = log_message("Iniciando verificação automática de email...", "info")
+                    next(gen)
+                    verifier = EmailVerifier(email, current_email_password)
+                    verification_url = verifier.search_discord_verification_email(timeout=60)
+                    if verification_url:
+                        gen = log_message("URL de verificação encontrada! Processando...", "success")
+                        next(gen)
+                        driver.execute_script(f"window.open('{verification_url}', '_blank');")
+                        driver.switch_to.window(driver.window_handles[-1])
+                        time.sleep(5)
+                        driver.close()
+                        driver.switch_to.window(driver.window_handles[0])
+                        time.sleep(3)
+                        gen = log_message("Verificação de email concluída!", "success")
+                        next(gen)
+                        verifier.disconnect()
+                    else:
+                        gen = log_message("Falha na verificação automática. Erro de autenticação - use 'App Password'. Tentando manual.", "error")
+                        next(gen)
+                        email_web_url = get_email_web_url(email)
+                        if email_web_url:
+                            webbrowser.open(email_web_url)
+                            gen = log_message(f"Abrindo {email_web_url} para verificação manual.", "info")
+                            next(gen)
+                        yield {"type": "manual_email_verify"}
+                        user_signal = yield {"type": "waiting_manual_verify"}
+                        if user_signal != "manual_verify_done":
+                            driver.quit()
+                            return "EMAIL_VERIFICATION_FAILED", logs
+                        verification_required = False
+
+            time.sleep(2)
+
+        if not login_success:
             current_url = driver.current_url
             page_source = driver.page_source.lower()
 
             error_type = None
-            if 'login' in current_url and not verification_required:
+            if 'login' in current_url.lower():
                 if any(phrase in page_source for phrase in ['couldn\'t find an account', 'não encontramos uma conta', 'email not found', 'e-mail não encontrado']):
                     error_type = "Wrong Email"
-                elif any(phrase in page_source for phrase in ['incorrect password', 'senha incorreta', 'invalid credentials']):
+                    gen = log_message("⚠️ AVISO: Email não encontrado. Verifique se o email está correto.", "error")
+                    next(gen)
+                elif any(phrase in page_source for phrase in ['incorrect password', 'senha incorreta', 'invalid credentials', 'wrong password']):
                     error_type = "Wrong Password"
+                    gen = log_message("⚠️ AVISO: Senha do Discord incorreta. Verifique e tente novamente.", "error")
+                    next(gen)
                 else:
                     error_type = "Wrong Login"
+                    gen = log_message("⚠️ Erro no login. Verifique credenciais ou conexão.", "error")
+                    next(gen)
 
             if error_type:
-                msg = f"{error_type}"
-                log_message(msg, "error")
                 driver.quit()
                 return f"{error_type}", logs
 
-            try:
-                WebDriverWait(driver, 60).until(lambda d: EC.url_contains('channels')(d) or EC.url_contains('app')(d))
-                login_success = True
-            except TimeoutException:
-                try:
-                    code_input = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "code")))
-                    if code_input:
-                        log_message("2FA detectado. Aguardando código...", "warning")
-                        driver.quit()
-                        return "2FA_REQUIRED", logs
-                except TimeoutException:
-                    msg = "Falha no login (possivelmente credenciais erradas ou CAPTCHA)."
-                    log_message(msg, "error")
-                    driver.quit()
-                    return "Wrong Login", logs
-
-            if login_success:
-                token = get_discord_token(driver)
-                if not token:
-                    log_message("Não foi possível obter o token. Tentando novamente...", "warning")
-                    token = None
-                else:
-                    log_message("Token obtido com sucesso! Fechando navegador...", "success")
-            else:
-                token = None
-
-        finally:
+            gen = log_message("Falha no login (timeout). Processo cancelado.", "error")
+            next(gen)
             driver.quit()
+            return "LOGIN_TIMEOUT", logs
+
+        # Aguarda login completo
+        start_time = time.time()
+        while time.time() - start_time < 60:
+            if 'channels' in driver.current_url.lower() or 'app' in driver.current_url.lower():
+                login_success = True
+                break
             time.sleep(2)
-            profile_dir = os.path.join(os.getcwd(), "temp_profile_token")
-            try:
-                if os.path.exists(profile_dir):
-                    shutil.rmtree(profile_dir)
-            except:
-                pass
+
+        if login_success:
+            token = get_discord_token(driver)
+            if not token:
+                gen = log_message("Não foi possível obter o token.", "warning")
+                next(gen)
+                token = None
+            else:
+                gen = log_message("Token obtido com sucesso!", "success")
+                next(gen)
+        else:
+            token = None
+
+        driver.quit()
+        time.sleep(2)
+
+    except Exception as e:
+        gen = log_message(f"Exceção geral: {e}", "error")
+        next(gen)
+        if 'driver' in locals():
+            driver.quit()
+        return "ERROR", logs
 
     if token:
         changer = Change()
         change_success, new_token = changer.Changer(token, old_password, email, new_password, logs)
 
         if change_success and new_token:
-            log_message("Mudança de senha bem-sucedida. Prosseguindo para exclusão...", "success")
+            gen = log_message("Mudança de senha bem-sucedida. Prosseguindo para exclusão...", "success")
+            next(gen)
             deleter_success = changer.Deleter(new_token, new_password, logs)
             if deleter_success:
-                log_message("Tudo concluído!", "success")
+                gen = log_message("Tudo concluído!", "success")
+                next(gen)
                 return "SUCCESS", logs
             else:
-                log_message("Falha na exclusão.", "error")
+                gen = log_message("Falha na exclusão.", "error")
+                next(gen)
                 return "DELETE_FAILED", logs
         else:
-            log_message("Falha na mudança de senha. Tentando exclusão com senha antiga...", "warning")
+            gen = log_message("Falha na mudança de senha. Tentando exclusão com senha antiga...", "warning")
+            next(gen)
             deleter_success = changer.Deleter(token, old_password, logs)
             if deleter_success:
-                log_message("Exclusão concluída com senha antiga.", "success")
+                gen = log_message("Exclusão concluída com senha antiga.", "success")
+                next(gen)
                 return "SUCCESS", logs
             else:
-                log_message("Falha na exclusão.", "error")
+                gen = log_message("Falha na exclusão.", "error")
+                next(gen)
                 return "DELETE_FAILED", logs
     else:
-        log_message("Falha ao obter token. Processo cancelado.", "error")
+        gen = log_message("Falha ao obter token. Processo cancelado.", "error")
+        next(gen)
         return "TOKEN_FAILED", logs

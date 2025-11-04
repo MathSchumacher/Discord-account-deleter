@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 import base64
 from delete_discord_account import process_account
@@ -87,7 +88,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- 3. Título e Ícone Alinhados Lado a Lado (corrigido com base64) ---
+# --- 3. Título e Ícone Alinhados Lado a Lado ---
 with open("img/discord.svg", "rb") as f:
     discord_icon = base64.b64encode(f.read()).decode()
 
@@ -99,23 +100,23 @@ st.markdown(f"""
     <hr>
 """, unsafe_allow_html=True)
 
-
-
 # --- 4. Inicializa estado da sessão ---
 if 'logs' not in st.session_state:
     st.session_state.logs = []
 if 'processing' not in st.session_state:
     st.session_state.processing = False
-if 'email_verification_required' not in st.session_state:
-    st.session_state.email_verification_required = False
+if 'gen' not in st.session_state:
+    st.session_state.gen = None
 if 'current_email' not in st.session_state:
     st.session_state.current_email = ""
 if 'current_password' not in st.session_state:
     st.session_state.current_password = ""
 if 'email_password' not in st.session_state:
     st.session_state.email_password = ""
+if 'result' not in st.session_state:
+    st.session_state.result = None
 
-# --- 5. Formulário Principal COMPACTO ---
+# --- 5. Formulário Principal ---
 with st.form("account_submission_form"):
     col1, col2 = st.columns([2, 1])
     
@@ -139,79 +140,11 @@ with st.form("account_submission_form"):
     submitted = st.form_submit_button(
         "🚀 Processar Conta", 
         type="primary", 
-        disabled=st.session_state.processing or st.session_state.email_verification_required
+        disabled=st.session_state.processing
     )
 
-# --- 6. Formulário de Verificação de Email COMPACTO ---
-if st.session_state.email_verification_required:
-    st.markdown("---")
-    st.markdown("""
-        <div class='email-verification-box'>
-            <h3 style='margin: 0 0 8px 0; font-size: 1.1rem;'>🔐 Verificação de Email Necessária</h3>
-            <p style='margin: 4px 0; font-size: 0.9rem;'>Digite a senha do seu email para continuar automaticamente:</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    with st.form("email_verification_form"):
-        email_password = st.text_input(
-            "📧 Senha do Email:", 
-            type="password", 
-            placeholder="Senha do seu email",
-            key="email_password_input"
-        )
-        
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            verify_submitted = st.form_submit_button(
-                "✅ Continuar Verificação",
-                type="primary",
-                use_container_width=True
-            )
-        with col2:
-            cancel_verification = st.form_submit_button(
-                "❌ Cancelar",
-                use_container_width=True
-            )
-        
-        if verify_submitted and email_password:
-            st.session_state.email_password = email_password
-            st.session_state.processing = True
-            st.session_state.email_verification_required = False
-            
-            with st.spinner("🔄 Continuando verificação..."):
-                try:
-                    result, returned_logs = process_account(
-                        st.session_state.current_email,
-                        st.session_state.current_password,
-                        new_password,
-                        st.session_state.email_password,
-                        st.session_state.logs
-                    )
-                    
-                    st.session_state.logs = returned_logs
-                    
-                    if result == "SUCCESS":
-                        st.success("✅ Processo concluído com sucesso!")
-                    else:
-                        st.error(f"❌ Processo finalizado com status: {result}")
-                        
-                except Exception as e:
-                    error_log = {"message": f"❌ Erro na verificação: {str(e)}", "level": "error"}
-                    st.session_state.logs.append(error_log)
-                    st.error(f"❌ Falha na verificação: {str(e)}")
-                    
-                finally:
-                    st.session_state.processing = False
-                    st.session_state.email_password = ""
-                    st.rerun()
-        
-        if cancel_verification:
-            st.session_state.email_verification_required = False
-            st.session_state.logs.append({"message": "❌ Verificação de email cancelada", "level": "warning"})
-            st.rerun()
-
-# --- 7. Lógica de Processamento Principal ---
-if not st.session_state.email_verification_required and submitted:
+# --- 6. Iniciar Processamento ---
+if submitted and not st.session_state.processing:
     if not email or not old_password:
         st.warning("⚠️ Preencha email e senha para continuar.")
     else:
@@ -219,48 +152,87 @@ if not st.session_state.email_verification_required and submitted:
         st.session_state.current_email = email
         st.session_state.current_password = old_password
         st.session_state.logs = []
-        
-        with st.spinner("🔄 Processando..."):
-            try:
-                result, returned_logs = process_account(email, old_password, new_password)
-                
-                if result == "EMAIL_VERIFICATION_REQUIRED":
-                    st.session_state.email_verification_required = True
-                    st.session_state.logs = returned_logs
-                    st.warning("🔐 Verificação de email necessária.")
-                elif result == "2FA_REQUIRED":
-                    st.session_state.logs = returned_logs
-                    st.error("❌ 2FA detectado.")
-                elif result == "SUCCESS":
-                    st.session_state.logs = returned_logs
-                    st.success("✅ Processo concluído com sucesso!")
-                else:
-                    st.session_state.logs = returned_logs
-                    st.error(f"❌ Processo finalizado com status: {result}")
-                    
-            except Exception as e:
-                error_log = {"message": f"❌ Erro geral: {str(e)}", "level": "error"}
-                st.session_state.logs.append(error_log)
-                st.error(f"❌ Falha no processamento: {str(e)}")
-                
-            finally:
-                if not st.session_state.email_verification_required:
-                    st.session_state.processing = False
-                st.rerun()
+        st.session_state.result = None
+        st.session_state.gen = process_account(email, old_password, new_password)
+        st.rerun()
 
-# --- 8. Exibe Logs COMPACTOS ---
+# --- 7. Gerenciar Generator ---
+if st.session_state.processing and st.session_state.gen:
+    try:
+        # Avançar generator
+        state = next(st.session_state.gen)
+        while isinstance(state, dict) and 'type' in state:
+            if state['type'] == 'log':
+                st.session_state.logs.append({'message': state['message'], 'level': state['level']})
+                st.rerun()  # Rerun to show log immediately
+            elif state['type'] == 'need_captcha':
+                st.warning("🛡️ CAPTCHA detectado! Resolva manualmente no navegador.")
+                if st.button("✅ Captcha Finalizado", type="primary"):
+                    st.session_state.gen.send("captcha_done")
+                    st.rerun()
+                st.stop()
+            elif state['type'] == 'need_2fa':
+                st.warning("🔐 2FA detectado! Insira o código no navegador.")
+                if st.button("✅ 2FA Finalizado", type="primary"):
+                    st.session_state.gen.send("2fa_done")
+                    st.rerun()
+                st.stop()
+            elif state['type'] == 'need_email_pass':
+                st.warning("📧 Verificação de email detectada! Digite a senha do email.")
+                with st.form("email_form"):
+                    email_pwd = st.text_input("🔑 Senha do Email:", type="password")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        submit_email = st.form_submit_button("✅ Confirmar", type="primary")
+                    with col2:
+                        cancel = st.form_submit_button("❌ Cancelar")
+                    if submit_email and email_pwd:
+                        st.session_state.gen.send(email_pwd)
+                        st.rerun()
+                    if cancel:
+                        st.session_state.gen.send(None)
+                        st.rerun()
+                st.stop()
+            elif state['type'] == 'manual_email_verify':
+                st.warning("📧 Verificação manual necessária. Verifique o email e clique no link de verificação no navegador Discord.")
+                if st.button("✅ Verificação Finalizada", type="primary"):
+                    st.session_state.gen.send("manual_verify_done")
+                    st.rerun()
+                st.stop()
+            else:
+                # Unknown state
+                break
+        # If we reach here, process completed
+        result, final_logs = st.session_state.gen.send(None)  # End it
+        st.session_state.logs.extend(final_logs)
+        st.session_state.result = result
+        st.session_state.processing = False
+        st.session_state.gen = None
+        st.rerun()
+    except StopIteration:
+        st.session_state.processing = False
+        st.session_state.gen = None
+        st.rerun()
+    except Exception as e:
+        st.session_state.logs.append({"message": f"Erro no generator: {e}", "level": "error"})
+        st.session_state.processing = False
+        st.session_state.gen = None
+        st.rerun()
+
+# --- 8. Mostrar Resultado ---
+if st.session_state.result:
+    if st.session_state.result == "SUCCESS":
+        st.success("✅ Sucesso!")
+    else:
+        st.error(f"❌ {st.session_state.result}")
+
+# --- 9. Exibe Logs ---
 if st.session_state.logs:
-    st.subheader("📋 Logs do Processo")
-    
-    for log_entry in st.session_state.logs:
-        msg = log_entry.get("message", "Log sem mensagem")
-        level = log_entry.get("level", "info")
-        
-        if "Wrong Email" in msg or "Wrong Login" in msg:
-            st.warning(msg)
-        elif "Wrong Password" in msg:
-            st.error(msg)
-        elif level == "success":
+    st.subheader("📋 Logs em Tempo Real")
+    for log in st.session_state.logs:
+        msg = log["message"]
+        level = log["level"]
+        if level == "success":
             st.success(msg)
         elif level == "error":
             st.error(msg)
@@ -269,23 +241,13 @@ if st.session_state.logs:
         else:
             st.info(msg)
 
-# --- 9. Botões de reiniciar e limpar COMPACTOS ---
-if not st.session_state.processing and st.session_state.logs:
-    col_restart, col_clear = st.columns([1, 1])
-    with col_restart:
-        if st.button("🔄 Reiniciar Processo", use_container_width=True):
-            st.session_state.logs = []
-            st.session_state.processing = False
-            st.session_state.email_verification_required = False
-            st.session_state.email_password = ""
-            st.rerun()
-    with col_clear:
-        if st.button("🗑️ Limpar Tudo", use_container_width=True):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+# --- 10. Reiniciar ---
+if st.button("🔄 Reiniciar"):
+    for key in st.session_state.keys():
+        delattr(st.session_state, key)
+    st.rerun()
 
-# --- 10. Footer compacto ---
+# --- 11. Footer ---
 st.markdown("---")
 st.markdown(
     '<div class="footer">Discord Account Deleter • Use com responsabilidade</div>',
