@@ -18,6 +18,9 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 import shutil
 
+# Fix para Streamlit Cloud: Força uso de driver local sem download
+os.environ["WDM_LOCAL"] = "1"
+
 try:
     import tls_client
 except ModuleNotFoundError:
